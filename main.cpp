@@ -43,6 +43,7 @@ struct Room
     Room() {}
     int id;
     int guest_id = -1;
+    int floor;
     std::atomic<bool> is_ready_for_guest{true};
     std::mutex mx;
 
@@ -81,6 +82,7 @@ struct Coffee_machine
     Coffee_machine() {}
     std::mutex mx;
     int millilitres = 3000;
+    int floor = 1;
 };
 
 struct Swimming_pool
@@ -88,6 +90,14 @@ struct Swimming_pool
     Swimming_pool() {}
     std::mutex mx;
     int capacity = 5;
+    int floor = 2;
+};
+
+struct Elevator
+{
+    std::vector<int> guests_inside;
+    std::mutex mxs[3];
+    std::condition_variable cvs[3];
 };
 
 struct Receptionist
@@ -147,14 +157,17 @@ struct Receptionist
 struct Guest
 {
     Guest(int id, Receptionist &receptionist, Coffee_machine &coffee_machine,
-          Swimming_pool &swimming_pool) : id(id), receptionist(receptionist),
-                                          coffee_machine(coffee_machine), swimming_pool(swimming_pool) {}
+          Swimming_pool &swimming_pool, Elevator &elevator) : id(id), receptionist(receptionist),
+                                                              coffee_machine(coffee_machine), swimming_pool(swimming_pool), elevator(elevator) {}
     int id;
     int room_id = -1;
+
+    int current_floor;
 
     Receptionist &receptionist;
     Coffee_machine &coffee_machine;
     Swimming_pool &swimming_pool;
+    Elevator &elevator;
 
     void check_in()
     {
@@ -164,12 +177,13 @@ struct Guest
             receptionist.cv.wait(lock_receptionist);
         }
         receptionist.is_a_room_ready = false;
-        this->room_id = receptionist.number_to_check_in;           //assign room to guest
-        receptionist.rooms[this->room_id].guest_arrives(this->id); //assign guest to room && room becomes occupied
-        {
-            std::lock_guard<std::mutex> writing_lock(mx_writing);
-            //std::cout << "Guest " << this->id << " accomodated in room " << this->room_id << std::endl;
-        }
+        this->room_id = receptionist.number_to_check_in;               //assign room to guest
+        this->current_floor = receptionist.rooms[this->room_id].floor; //assign floor where guest currently is
+        receptionist.rooms[this->room_id].guest_arrives(this->id);     //assign guest to room && room becomes occupied
+
+        //std::lock_guard<std::mutex> writing_lock(mx_writing);
+        //std::cout << "Guest " << this->id << " accomodated in room " << this->room_id << std::endl;
+
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
@@ -196,6 +210,15 @@ struct Guest
         {
             std::unique_lock<std::mutex> lock_coffee(swimming_pool.mx);
             swimming_pool.capacity += 1;
+        }
+    }
+
+    void use_elevator(int destination_floor)
+    {
+        std::unique_lock<std::mutex> lock_elevator(this->elevator.mxs[this->current_floor]);
+        while (this->elevator.guests_inside.size() > 3)
+        {
+            this->elevator.cvs[this->current_floor].wait(lock_elevator);
         }
     }
 
@@ -271,7 +294,8 @@ int main()
     std::vector<Room> rooms(9);
     for (int i = 0; i < 9; i++)
     {
-        rooms[i].id = i;
+        rooms[i].id = 8 - i;
+        rooms[i].floor = rooms[i].id / 3;
         rooms[i].y_corner = i / 3 * 5;
         rooms[i].x_corner = i % 3 * 5;
         rooms[i].draw_room();
@@ -288,11 +312,12 @@ int main()
 
     Coffee_machine coffee_machine;
     Swimming_pool swimming_pool;
+    Elevator elevator;
 
     std::vector<Guest> guests;
     for (int i = 0; i < 15; i++)
     {
-        guests.emplace_back(i, receptionist, coffee_machine, swimming_pool);
+        guests.emplace_back(i, receptionist, coffee_machine, swimming_pool, elevator);
     }
 
     std::vector<std::thread> threadList;

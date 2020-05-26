@@ -95,9 +95,31 @@ struct Swimming_pool
 
 struct Elevator
 {
+    int current_floor;
     std::vector<int> guests_inside;
-    std::mutex mxs[3];
-    std::condition_variable cvs[3];
+    std::mutex mx_out, mx_in;
+    std::condition_variable cv_out, cv_in;
+
+    void go_to_floor(int floor)
+    {
+        {
+            std::unique_lock<std::mutex> lock_out(this->mx_out);
+            this->current_floor = floor;
+            this->cv_out.notify_all();
+        }
+        {
+            std::unique_lock<std::mutex> lock_in(this->mx_in);
+            this->cv_in.notify_all();
+        }
+    }
+
+    void go()
+    {
+        go_to_floor(0);
+        go_to_floor(1);
+        go_to_floor(2);
+        go_to_floor(1);
+    }
 };
 
 struct Receptionist
@@ -248,10 +270,23 @@ struct Guest
 
     void use_elevator(int destination_floor)
     {
-        std::unique_lock<std::mutex> lock_elevator(this->elevator.mxs[this->current_floor]);
-        while (this->elevator.guests_inside.size() > 3)
         {
-            this->elevator.cvs[this->current_floor].wait(lock_elevator);
+            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx_in);
+            while (this->current_floor != elevator.current_floor)
+            {
+                this->elevator.cv_in.wait(lock_elevator);
+            }
+            elevator.guests_inside.push_back(this->id);
+        }
+        {
+            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx_out);
+            while (destination_floor != elevator.current_floor)
+            {
+                this->elevator.cv_out.wait(lock_elevator);
+            }
+            //delete the id of the guest who is getting off
+            elevator.guests_inside.erase(std::remove(elevator.guests_inside.begin(), elevator.guests_inside.end(), this->id), elevator.guests_inside.end());
+            this->current_floor = destination_floor;
         }
     }
 

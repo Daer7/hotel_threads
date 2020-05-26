@@ -12,8 +12,8 @@
 
 #define ROOM_C 1
 #define RECEP_C 2
-#define PHIL_C 3
-#define FORK_C 4
+#define GUEST_C 3
+#define CLEANER_C 4
 
 std::mutex mx_writing;
 std::atomic<bool> cancellation_token(false);
@@ -47,7 +47,7 @@ struct Room
     std::atomic<bool> is_ready_for_guest{true};
     std::mutex mx;
 
-    int y_size = 5, x_size = 5, y_corner, x_corner;
+    int y_size = 7, x_size = 7, y_corner, x_corner;
     WINDOW *room_window;
 
     void draw_room()
@@ -55,7 +55,7 @@ struct Room
         room_window = newwin(y_size, x_size, y_corner, x_corner);
         std::lock_guard<std::mutex> writing_lock(mx_writing);
         box(room_window, 0, 0);
-        mvwprintw(room_window, 1, 1, "%2d", this->id);
+        mvwprintw(room_window, 1, 2, "%2d", this->id);
         wrefresh(room_window);
     }
     void guest_arrives(int guest_id)
@@ -63,16 +63,16 @@ struct Room
         this->guest_id = guest_id;
         this->is_ready_for_guest = false;
         std::lock_guard<std::mutex> writing_lock(mx_writing);
-        wattron(room_window, COLOR_PAIR(ROOM_C));
-        mvwprintw(room_window, 2, 1, "%2d", this->guest_id);
-        wattroff(room_window, COLOR_PAIR(ROOM_C));
+        wattron(room_window, COLOR_PAIR(GUEST_C));
+        mvwprintw(room_window, 2, 2, "%2d", this->guest_id);
+        wattroff(room_window, COLOR_PAIR(GUEST_C));
         wrefresh(room_window);
     }
     void guest_leaves(int guest_id)
     {
         this->guest_id = -1;
         std::lock_guard<std::mutex> writing_lock(mx_writing);
-        mvwprintw(room_window, 2, 1, "  ");
+        mvwprintw(room_window, 2, 2, "  ");
         wrefresh(room_window);
     }
 };
@@ -116,8 +116,8 @@ struct Receptionist
 
     void draw_receptionist_desk()
     {
-        receptionist_window = newwin(3, 40, 15, 0);
-        progress_window = newwin(3, 20, 15, 40);
+        receptionist_window = newwin(3, 40, 21, 0);
+        progress_window = newwin(3, 20, 21, 40);
         std::lock_guard<std::mutex> writing_lock(mx_writing);
         wattron(this->receptionist_window, COLOR_PAIR(RECEP_C));
         box(this->receptionist_window, 0, 0);
@@ -125,12 +125,13 @@ struct Receptionist
         wattron(this->progress_window, COLOR_PAIR(RECEP_C));
         box(this->progress_window, 0, 0);
         wattroff(this->progress_window, COLOR_PAIR(RECEP_C));
-        mvwprintw(this->receptionist_window, 1, 1, "RECEPTIONIST FOUND EMPTY ROOM: ");
+        mvwprintw(this->receptionist_window, 1, 1, "RECEPTIONIST LOOKING FOR A ROOM  ");
         wrefresh(this->receptionist_window);
         wrefresh(this->progress_window);
     }
     void check_free_rooms()
     {
+        fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(1400, 1800));
         std::unique_lock<std::mutex> lock_receptionist(mx);
         do
         {
@@ -138,17 +139,26 @@ struct Receptionist
         } while (!rooms[this->number_to_check_in].is_ready_for_guest);
         is_a_room_ready = true;
         cv.notify_one();
-        std::lock_guard<std::mutex> writing_lock(mx_writing);
-        mvwprintw(this->receptionist_window, 1, 32, "  ");
-        mvwprintw(this->receptionist_window, 1, 32, "%2d", this->number_to_check_in);
-        wrefresh(this->receptionist_window);
+
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->receptionist_window, 1, 14, "FOUND A FREE ROOM %d", this->number_to_check_in);
+            wrefresh(this->receptionist_window);
+        }
+
+        fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(1000, 1400));
+
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->receptionist_window, 1, 14, "LOOKING FOR A ROOM  ");
+            wrefresh(this->receptionist_window);
+        }
     }
 
     void accommodate_guests()
     {
         while (true)
         {
-            fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(1000, 1400));
             check_free_rooms();
         }
     }
@@ -169,6 +179,28 @@ struct Guest
     Swimming_pool &swimming_pool;
     Elevator &elevator;
 
+    WINDOW *guest_window;
+    WINDOW *progress_window;
+
+    int yg_size = 3, xg_size = 60, yg_corner, xg_corner, yp_size = 3, xp_size = 40, yp_corner, xp_corner;
+
+    void draw_guest()
+    {
+        guest_window = newwin(yg_size, xg_size, yg_corner, xg_corner);
+        progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
+
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        wattron(this->guest_window, COLOR_PAIR(GUEST_C));
+        box(this->guest_window, 0, 0);
+        wattroff(this->guest_window, COLOR_PAIR(GUEST_C));
+        wattron(this->progress_window, COLOR_PAIR(GUEST_C));
+        box(this->progress_window, 0, 0);
+        wattroff(this->progress_window, COLOR_PAIR(GUEST_C));
+        mvwprintw(this->guest_window, 1, 1, "GUEST %2d ON FLOOR:   ", this->id);
+        wrefresh(this->guest_window);
+        wrefresh(this->progress_window);
+    }
+
     void check_in()
     {
         std::unique_lock<std::mutex> lock_receptionist(receptionist.mx);
@@ -177,14 +209,13 @@ struct Guest
             receptionist.cv.wait(lock_receptionist);
         }
         receptionist.is_a_room_ready = false;
-        this->room_id = receptionist.number_to_check_in;               //assign room to guest
-        this->current_floor = receptionist.rooms[this->room_id].floor; //assign floor where guest currently is
-        receptionist.rooms[this->room_id].guest_arrives(this->id);     //assign guest to room && room becomes occupied
+        this->room_id = receptionist.rooms[receptionist.number_to_check_in].id; //assign room to guest
+        this->current_floor = receptionist.rooms[this->room_id].floor;          //assign floor where guest currently is
+        receptionist.rooms[this->room_id].guest_arrives(this->id);              //assign guest to room && room becomes occupied
 
-        //std::lock_guard<std::mutex> writing_lock(mx_writing);
-        //std::cout << "Guest " << this->id << " accomodated in room " << this->room_id << std::endl;
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        mvwprintw(this->guest_window, 1, 19, "%1d CHECKED IN TO ROOM %1d", this->current_floor, this->room_id);
+        wrefresh(this->guest_window);
     }
 
     void drink_coffee()
@@ -225,6 +256,9 @@ struct Guest
     void leave_hotel()
     {
         receptionist.rooms[this->room_id].guest_leaves(this->id);
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        mvwprintw(this->guest_window, 1, 19, "XX LEFT THE HOTEL");
+        wrefresh(this->guest_window);
     }
 
     void have_holiday()
@@ -259,6 +293,28 @@ struct Cleaner
     Cleaner(int id, std::vector<Room> &rooms) : id(id), rooms(rooms) {}
     int id;
     std::vector<Room> &rooms;
+
+    WINDOW *cleaner_window;
+    WINDOW *progress_window;
+
+    int yc_size = 3, xc_size = 60, yc_corner, xc_corner = 100, yp_size = 3, xp_size = 40, yp_corner, xp_corner = 160;
+
+    void draw_cleaner()
+    {
+        cleaner_window = newwin(yc_size, xc_size, yc_corner, xc_corner);
+        progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        wattron(this->cleaner_window, COLOR_PAIR(CLEANER_C));
+        box(this->cleaner_window, 0, 0);
+        wattroff(this->cleaner_window, COLOR_PAIR(CLEANER_C));
+        wattron(this->progress_window, COLOR_PAIR(CLEANER_C));
+        box(this->progress_window, 0, 0);
+        wattroff(this->progress_window, COLOR_PAIR(CLEANER_C));
+        mvwprintw(cleaner_window, 1, 1, "CLEANER %1d WAITING FOR A ROOM", this->id);
+        wrefresh(cleaner_window);
+        wrefresh(progress_window);
+    }
+
     void find_room_to_clean()
     {
         for (Room &room : rooms)
@@ -266,8 +322,19 @@ struct Cleaner
             std::unique_lock<std::mutex> lock_room(room.mx);
             if (room.guest_id == -1 && !room.is_ready_for_guest)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(std::experimental::randint(1000, 2000)));
+                {
+                    std::lock_guard<std::mutex> writing_lock(mx_writing);
+                    mvwprintw(this->cleaner_window, 1, 11, "CLEANING ROOM %2d  ", room.id);
+                    wrefresh(this->cleaner_window);
+                }
+                fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
                 room.is_ready_for_guest = true;
+                {
+                    std::lock_guard<std::mutex> writing_lock(mx_writing);
+                    mvwprintw(this->cleaner_window, 1, 11, "WAITING FOR A ROOM");
+                    wrefresh(this->cleaner_window);
+                }
+                fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
             }
         }
     }
@@ -290,14 +357,16 @@ int main()
     start_color();
     init_pair(ROOM_C, COLOR_GREEN, COLOR_BLACK);
     init_pair(RECEP_C, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(GUEST_C, COLOR_BLUE, COLOR_BLACK);
+    init_pair(CLEANER_C, COLOR_RED, COLOR_BLACK);
 
     std::vector<Room> rooms(9);
     for (int i = 0; i < 9; i++)
     {
         rooms[i].id = 8 - i;
         rooms[i].floor = rooms[i].id / 3;
-        rooms[i].y_corner = i / 3 * 5;
-        rooms[i].x_corner = i % 3 * 5;
+        rooms[i].y_corner = i / 3 * 7;
+        rooms[i].x_corner = i % 3 * 7;
         rooms[i].draw_room();
     }
 
@@ -308,6 +377,9 @@ int main()
     for (int i = 0; i < 3; i++)
     {
         cleaners.emplace_back(i, rooms);
+        cleaners[i].yc_corner = 39 + i * 3;
+        cleaners[i].yp_corner = 39 + i * 3;
+        cleaners[i].draw_cleaner();
     }
 
     Coffee_machine coffee_machine;
@@ -318,6 +390,11 @@ int main()
     for (int i = 0; i < 15; i++)
     {
         guests.emplace_back(i, receptionist, coffee_machine, swimming_pool, elevator);
+        guests[i].yg_corner = 24 + i % 10 * 3;
+        guests[i].xg_corner = (i / 10) * 100;
+        guests[i].yp_corner = 24 + i % 10 * 3;
+        guests[i].xp_corner = 60 + (i / 10) * 100;
+        guests[i].draw_guest();
     }
 
     std::vector<std::thread> threadList;

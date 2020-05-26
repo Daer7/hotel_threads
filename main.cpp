@@ -209,13 +209,15 @@ struct Guest
             receptionist.cv.wait(lock_receptionist);
         }
         receptionist.is_a_room_ready = false;
-        this->room_id = receptionist.rooms[receptionist.number_to_check_in].id; //assign room to guest
-        this->current_floor = receptionist.rooms[this->room_id].floor;          //assign floor where guest currently is
-        receptionist.rooms[this->room_id].guest_arrives(this->id);              //assign guest to room && room becomes occupied
-
-        std::lock_guard<std::mutex> writing_lock(mx_writing);
-        mvwprintw(this->guest_window, 1, 19, "%1d CHECKED IN TO ROOM %1d", this->current_floor, this->room_id);
-        wrefresh(this->guest_window);
+        this->room_id = receptionist.number_to_check_in;               //assign room to guest
+        this->current_floor = receptionist.rooms[this->room_id].floor; //assign floor where guest currently is
+        receptionist.rooms[this->room_id].guest_arrives(this->id);     //assign guest to room && room becomes occupied
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 19, "%1d CHECKED IN TO ROOM %1d", this->current_floor, this->room_id);
+            wrefresh(this->guest_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
     }
 
     void drink_coffee()
@@ -256,9 +258,12 @@ struct Guest
     void leave_hotel()
     {
         receptionist.rooms[this->room_id].guest_leaves(this->id);
-        std::lock_guard<std::mutex> writing_lock(mx_writing);
-        mvwprintw(this->guest_window, 1, 19, "XX LEFT THE HOTEL");
-        wrefresh(this->guest_window);
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 19, "XX LEFT THE HOTEL");
+            wrefresh(this->guest_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
     }
 
     void have_holiday()
@@ -266,9 +271,7 @@ struct Guest
         while (true)
         {
             check_in();
-            std::this_thread::sleep_for(std::chrono::milliseconds(std::experimental::randint(1000, 1500)));
             leave_hotel();
-            std::this_thread::sleep_for(std::chrono::milliseconds(std::experimental::randint(500, 1000)));
         }
     }
 };
@@ -361,12 +364,12 @@ int main()
     init_pair(CLEANER_C, COLOR_RED, COLOR_BLACK);
 
     std::vector<Room> rooms(9);
-    for (int i = 0; i < 9; i++)
+    for (int i = 8; i >= 0; i--)
     {
-        rooms[i].id = 8 - i;
+        rooms[i].id = i;
         rooms[i].floor = rooms[i].id / 3;
-        rooms[i].y_corner = i / 3 * 7;
-        rooms[i].x_corner = i % 3 * 7;
+        rooms[i].y_corner = (8 - i) / 3 * 7;
+        rooms[i].x_corner = (8 - i) % 3 * 7;
         rooms[i].draw_room();
     }
 

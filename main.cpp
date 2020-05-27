@@ -14,16 +14,21 @@
 #define GUEST_C 2
 #define CLEANER_C 3
 #define ELEVATOR_C 4
+#define WAITER_C 5
+#define COFFEE_C 6
 
 std::mutex mx_writing;
 std::atomic<bool> cancellation_token(false);
 
 void fill_progress_bar(WINDOW *progress_window, int COL, int width, int sleep_time)
 {
-    werase(progress_window);
-    wattron(progress_window, COL);
-    box(progress_window, 0, 0);
-    wattroff(progress_window, COL);
+    {
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        werase(progress_window);
+        wattron(progress_window, COL);
+        box(progress_window, 0, 0);
+        wattroff(progress_window, COL);
+    }
     int single_sleep = sleep_time / (width - 2);
     for (int i = 1; i < width - 1; i++)
     {
@@ -80,9 +85,28 @@ struct Room
 struct Coffee_machine
 {
     Coffee_machine() {}
+    int millilitres = 1000;
+    int floor = 2;
+
+    WINDOW *coffee_window;
+
+    void draw_coffee_machine()
+    {
+        coffee_window = newwin(7, 20, 0, 60);
+
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        wattron(this->coffee_window, COLOR_PAIR(COFFEE_C));
+        box(this->coffee_window, 0, 0);
+        wattroff(this->coffee_window, COLOR_PAIR(COFFEE_C));
+        mvwprintw(this->coffee_window, 1, 7, "COFFEE");
+        mvwprintw(this->coffee_window, 3, 5, "MILLILITRES");
+        mvwprintw(this->coffee_window, 4, 8, "%4d", this->millilitres);
+        wrefresh(this->coffee_window);
+    }
+
     std::mutex mx;
-    int millilitres = 3000;
-    int floor = 1;
+    std::condition_variable cv_drink;
+    std::condition_variable cv_refill;
 };
 
 struct Swimming_pool
@@ -90,12 +114,12 @@ struct Swimming_pool
     Swimming_pool() {}
     std::mutex mx;
     int capacity = 5;
-    int floor = 2;
+    int floor = 0;
 };
 
 struct Elevator
 {
-    int current_floor;
+    int current_floor = 0;
     std::vector<int> guests_inside;
     std::mutex mx_out, mx_in;
     std::condition_variable cv_out, cv_in;
@@ -114,7 +138,10 @@ struct Elevator
         wattron(this->progress_window, COLOR_PAIR(ELEVATOR_C));
         box(this->progress_window, 0, 0);
         wattroff(this->progress_window, COLOR_PAIR(ELEVATOR_C));
-        mvwprintw(this->elevator_window, 1, 1, "FLOOR");
+        mvwprintw(this->elevator_window, 2, 16, "ELEVATOR");
+        mvwprintw(this->elevator_window, 6, 13, "CURRENT FLOOR");
+        mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
+        mvwprintw(this->elevator_window, 11, 13, "GUESTS INSIDE");
         wrefresh(this->elevator_window);
         wrefresh(this->progress_window);
     }
@@ -173,6 +200,7 @@ struct Receptionist
         wrefresh(this->receptionist_window);
         wrefresh(this->progress_window);
     }
+
     void check_free_rooms()
     {
         fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(700, 1300));
@@ -180,10 +208,10 @@ struct Receptionist
             std::unique_lock<std::mutex> lock_receptionist(mx);
             do
             {
-                this->number_to_check_in = std::experimental::randint(0, (int)rooms.size() - 1); //find an empty room
+                this->number_to_check_in = std::experimental::randint(0, (int)rooms.size() - 1); //try to find an empty room
             } while (!rooms[this->number_to_check_in].is_ready_for_guest);
             is_a_room_ready = true;
-            cv.notify_one();
+            cv.notify_one(); //notify a guest that an empty room has been found
         }
 
         {
@@ -242,7 +270,7 @@ struct Guest
         wattron(this->progress_window, COLOR_PAIR(GUEST_C));
         box(this->progress_window, 0, 0);
         wattroff(this->progress_window, COLOR_PAIR(GUEST_C));
-        mvwprintw(this->guest_window, 1, 1, "GUEST %2d ON FLOOR:   ", this->id);
+        mvwprintw(this->guest_window, 1, 1, "GUEST %2d ROOM: X | FLOOR: X WAITING FOR CHECK-IN", this->id);
         wrefresh(this->guest_window);
         wrefresh(this->progress_window);
     }
@@ -262,7 +290,8 @@ struct Guest
         }
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
-            mvwprintw(this->guest_window, 1, 19, "%1d CHECKED IN TO ROOM %1d", this->current_floor, this->room_id);
+            mvwprintw(this->guest_window, 1, 16, "%1d", this->room_id);
+            mvwprintw(this->guest_window, 1, 27, "%1d CHECKED IN TO ROOM %1d   ", this->current_floor, this->room_id);
             wrefresh(this->guest_window);
         }
         fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
@@ -271,11 +300,13 @@ struct Guest
     void drink_coffee()
     {
         std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-        int amount_to_drink = std::experimental::randint(400, 600);
-        if (coffee_machine.millilitres - amount_to_drink >= 0)
+        int amount_to_drink = std::experimental::randint(200, 600);
+        while (coffee_machine.millilitres - amount_to_drink < 0)
         {
-            coffee_machine.millilitres -= amount_to_drink;
+            coffee_machine.cv_drink.wait(lock_coffee);
         }
+        coffee_machine.millilitres -= amount_to_drink;
+        coffee_machine.cv_refill.notify_one();
     }
 
     void go_swimming()
@@ -321,7 +352,8 @@ struct Guest
         receptionist.rooms[this->room_id].guest_leaves(this->id);
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
-            mvwprintw(this->guest_window, 1, 19, "XX LEFT THE HOTEL");
+            mvwprintw(this->guest_window, 1, 16, "X");
+            mvwprintw(this->guest_window, 1, 27, "X LEFT THE HOTEL           ");
             wrefresh(this->guest_window);
         }
         fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
@@ -342,12 +374,42 @@ struct Waiter
     Waiter(Coffee_machine &coffee_machine) : coffee_machine(coffee_machine) {}
     Coffee_machine &coffee_machine;
 
+    WINDOW *waiter_window;
+    WINDOW *progress_window;
+
+    void draw_waiter()
+    {
+        waiter_window = newwin(3, 60, 4, 80);
+        progress_window = newwin(3, 40, 4, 140);
+
+        std::lock_guard<std::mutex> writing_lock(mx_writing);
+        wattron(this->waiter_window, COLOR_PAIR(WAITER_C));
+        box(this->waiter_window, 0, 0);
+        wattroff(this->waiter_window, COLOR_PAIR(WAITER_C));
+        wattron(this->progress_window, COLOR_PAIR(WAITER_C));
+        box(this->progress_window, 0, 0);
+        wattroff(this->progress_window, COLOR_PAIR(WAITER_C));
+        mvwprintw(this->waiter_window, 1, 1, "WAITER READY TO SERVE");
+        wrefresh(this->waiter_window);
+        wrefresh(this->progress_window);
+    }
+
     void refill_coffee()
     {
         std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-        if (coffee_machine.millilitres < 450)
+        while (coffee_machine.millilitres > 300)
         {
-            coffee_machine.millilitres += std::experimental::randint(2000, 3000);
+            coffee_machine.cv_refill.wait(lock_coffee);
+        }
+        coffee_machine.millilitres += std::experimental::randint(300, 1000);
+        coffee_machine.cv_drink.notify_one();
+    }
+
+    void serve_guests()
+    {
+        while (true)
+        {
+            refill_coffee();
         }
     }
 };
@@ -387,7 +449,7 @@ struct Cleaner
             {
                 continue;
             }
-            else
+            else //see if room needs to be cleaned
             {
                 std::unique_lock<std::mutex> lock_room(room.mx, std::adopt_lock);
                 if (room.guest_id == -1 && !room.is_ready_for_guest)
@@ -404,7 +466,7 @@ struct Cleaner
                         mvwprintw(this->cleaner_window, 1, 11, "WAITING FOR A ROOM");
                         wrefresh(this->cleaner_window);
                     }
-                    fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
+                    fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(1500, 2500));
                 }
             }
         }
@@ -430,6 +492,8 @@ int main()
     init_pair(GUEST_C, COLOR_BLUE, COLOR_BLACK);
     init_pair(CLEANER_C, COLOR_RED, COLOR_BLACK);
     init_pair(ELEVATOR_C, COLOR_MAGENTA, COLOR_BLACK);
+    init_pair(WAITER_C, COLOR_CYAN, COLOR_BLACK);
+    init_pair(COFFEE_C, COLOR_GREEN, COLOR_BLACK);
 
     std::vector<Room> rooms(9);
     for (int i = 8; i >= 0; i--)
@@ -454,10 +518,15 @@ int main()
     }
 
     Coffee_machine coffee_machine;
+    coffee_machine.draw_coffee_machine();
+
     Swimming_pool swimming_pool;
 
     Elevator elevator;
     elevator.draw_elevator();
+
+    Waiter waiter(coffee_machine);
+    waiter.draw_waiter();
 
     std::vector<Guest> guests;
     for (int i = 0; i < 15; i++)
@@ -481,6 +550,7 @@ int main()
     {
         threadList.emplace_back(&Cleaner::clean_rooms, std::ref(cleaner));
     }
+    threadList.emplace_back(&Waiter::serve_guests, std::ref(waiter));
 
     for (std::thread &t : threadList)
     {

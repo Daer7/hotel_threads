@@ -311,13 +311,20 @@ struct Guest
         wattron(this->progress_window, COLOR_PAIR(GUEST_C));
         box(this->progress_window, 0, 0);
         wattroff(this->progress_window, COLOR_PAIR(GUEST_C));
-        mvwprintw(this->guest_window, 1, 1, "GUEST %2d ROOM: X | FLOOR: X WAITING FOR CHECK-IN", this->id);
+        mvwprintw(this->guest_window, 1, 1, "GUEST %2d ROOM: X | FLOOR: 0 WAITING FOR CHECK-IN", this->id);
         wrefresh(this->guest_window);
         wrefresh(this->progress_window);
     }
 
     void check_in()
     {
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 27, "0 WAITING FOR CHECK-IN");
+            wrefresh(this->guest_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
+
         {
             std::unique_lock<std::mutex> lock_receptionist(receptionist.mx);
             while (!receptionist.is_a_room_ready)
@@ -349,14 +356,14 @@ struct Guest
                 wrefresh(this->guest_window);
             }
 
-            coffee_machine.guests_amounts_list.emplace_back(this->id, amount_to_drink);
+            coffee_machine.guests_amounts_list.emplace_back(this->id, amount_to_drink); //queue up for coffee
 
             while (coffee_machine.millilitres - amount_to_drink < 0)
             {
                 coffee_machine.cv_drink.wait(lock_coffee);
             }
 
-            coffee_machine.guests_amounts_list.remove(std::pair<int, int>(this->id, amount_to_drink));
+            coffee_machine.guests_amounts_list.remove(std::pair<int, int>(this->id, amount_to_drink)); //leave the queue
 
             coffee_machine.millilitres -= amount_to_drink;
 
@@ -480,15 +487,17 @@ struct Waiter
             {
                 refill_amount += guest_amount.second; //sum the amount all waiting guests want to drink
             }
-            coffee_machine.millilitres += (refill_amount + std::experimental::randint(100, 300)); //refill a little more
+
+            int final_refill_amount = refill_amount + std::experimental::randint(100, 300); //refill a little more than guests need
+            coffee_machine.millilitres += final_refill_amount;
 
             {
                 std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->waiter_window, 1, 8, "REFILLING %4d ML OF COFFEE", refill_amount);
+                mvwprintw(this->waiter_window, 1, 8, "REFILLING %4d ML OF COFFEE", final_refill_amount);
                 wrefresh(this->waiter_window);
             }
             fill_progress_bar(this->progress_window, COLOR_PAIR(WAITER_C), 40, std::experimental::randint(2500, 3500));
-            coffee_machine.waiter_refills(refill_amount);
+            coffee_machine.waiter_refills(final_refill_amount);
 
             coffee_machine.cv_drink.notify_all(); //let all waiting guests know that coffee has been refilled
         }

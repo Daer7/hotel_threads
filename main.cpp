@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <list>
 #include <thread>
 #include <mutex>
 #include <chrono>
@@ -104,9 +105,10 @@ struct Coffee_machine
     int millilitres = 1000;
     int floor = 2;
 
+    std::list<std::pair<int, int>> guests_amounts_list;
+
     std::mutex mx;
     std::condition_variable cv_drink;
-    std::condition_variable cv_refill;
 
     WINDOW *coffee_window;
 
@@ -131,7 +133,7 @@ struct Coffee_machine
         mvwprintw(this->coffee_window, 9, 7, "%4d", this->millilitres);
         wattron(this->coffee_window, COLOR_PAIR(GUEST_C));
         mvwprintw(this->coffee_window, 5, 3, "GUEST %2d POURED", guest_id);
-        mvwprintw(this->coffee_window, 6, 7, "-%3d ML", amount);
+        mvwprintw(this->coffee_window, 6, 7, "-%4d ML", amount);
         wattroff(this->coffee_window, COLOR_PAIR(GUEST_C));
         wrefresh(this->coffee_window);
     }
@@ -142,7 +144,7 @@ struct Coffee_machine
         mvwprintw(this->coffee_window, 9, 7, "%4d", this->millilitres);
         wattron(this->coffee_window, COLOR_PAIR(WAITER_C));
         mvwprintw(this->coffee_window, 5, 3, "WAITER REFILLED");
-        mvwprintw(this->coffee_window, 6, 7, "+%3d ML", amount);
+        mvwprintw(this->coffee_window, 6, 7, "+%4d ML", amount);
         wattroff(this->coffee_window, COLOR_PAIR(WAITER_C));
         wrefresh(this->coffee_window);
     }
@@ -347,28 +349,15 @@ struct Guest
                 wrefresh(this->guest_window);
             }
 
-            if (coffee_machine.millilitres - amount_to_drink < 0) //check if waiter needs to be notified that there is not enough coffee
+            coffee_machine.guests_amounts_list.emplace_back(this->id, amount_to_drink);
+
+            while (coffee_machine.millilitres - amount_to_drink < 0)
             {
-                coffee_machine.cv_refill.notify_one();
-                lock_coffee.unlock();
-                fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
+                coffee_machine.cv_drink.wait(lock_coffee);
             }
-        }
-        //check again and individually pour coffee or give up if there is still not enough coffee
-        std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-        if (coffee_machine.millilitres - amount_to_drink < 0)
-        {
-            //coffee_machine.cv_drink.wait(lock_coffee);
-            {
-                std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "LEFT QUEUE WITHOUT COFFEE", amount_to_drink);
-                wrefresh(this->guest_window);
-            }
-            lock_coffee.unlock();
-            fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
-        }
-        else
-        {
+
+            coffee_machine.guests_amounts_list.remove(std::pair<int, int>(this->id, amount_to_drink));
+
             coffee_machine.millilitres -= amount_to_drink;
 
             {
@@ -377,17 +366,15 @@ struct Guest
                 wrefresh(this->guest_window);
             }
             fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
-
-            lock_coffee.unlock(); //unlock before drinking coffee so that others can pour some
             coffee_machine.guest_drinks(this->id, amount_to_drink);
-            {
-                std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "DRINKING %3d ML OF COFFEE ", amount_to_drink);
-                wrefresh(this->guest_window);
-            }
-            //sleep while drinking coffee
-            fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
         }
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 29, "DRINKING %3d ML OF COFFEE ", amount_to_drink);
+            wrefresh(this->guest_window);
+        }
+        //sleep while drinking coffee
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
     }
 
     void go_swimming()
@@ -471,32 +458,39 @@ struct Waiter
         wattron(this->progress_window, COLOR_PAIR(WAITER_C));
         box(this->progress_window, 0, 0);
         wattroff(this->progress_window, COLOR_PAIR(WAITER_C));
-        mvwprintw(this->waiter_window, 1, 1, "WAITER READY TO SERVE           ");
+        mvwprintw(this->waiter_window, 1, 1, "WAITER READY TO SERVE            ");
         wrefresh(this->waiter_window);
         wrefresh(this->progress_window);
     }
 
     void refill_coffee()
     {
-        std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-        while (coffee_machine.millilitres > 400)
-        {
-            coffee_machine.cv_refill.wait(lock_coffee);
-        }
-        int refill_value = std::experimental::randint(300, 999);
-        coffee_machine.millilitres += refill_value;
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
-            mvwprintw(this->waiter_window, 1, 8, "REFILLING %3d ML OF COFFEE", refill_value);
+            mvwprintw(this->waiter_window, 1, 8, "READY TO SERVE             ");
             wrefresh(this->waiter_window);
         }
-        fill_progress_bar(this->progress_window, COLOR_PAIR(WAITER_C), 40, std::experimental::randint(2500, 3500));
-        coffee_machine.waiter_refills(refill_value);
-        coffee_machine.cv_drink.notify_one();
+        fill_progress_bar(this->progress_window, COLOR_PAIR(WAITER_C), 40, std::experimental::randint(3500, 4500));
+
         {
-            std::lock_guard<std::mutex> writing_lock(mx_writing);
-            mvwprintw(this->waiter_window, 1, 8, "READY TO SERVE            ", refill_value);
-            wrefresh(this->waiter_window);
+            std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
+
+            int refill_amount = 0;
+            for (std::pair<int, int> &guest_amount : coffee_machine.guests_amounts_list) //calculate sufficient refill vallue
+            {
+                refill_amount += guest_amount.second; //sum the amount all waiting guests want to drink
+            }
+            coffee_machine.millilitres += (refill_amount + std::experimental::randint(100, 300)); //refill a little more
+
+            {
+                std::lock_guard<std::mutex> writing_lock(mx_writing);
+                mvwprintw(this->waiter_window, 1, 8, "REFILLING %4d ML OF COFFEE", refill_amount);
+                wrefresh(this->waiter_window);
+            }
+            fill_progress_bar(this->progress_window, COLOR_PAIR(WAITER_C), 40, std::experimental::randint(2500, 3500));
+            coffee_machine.waiter_refills(refill_amount);
+
+            coffee_machine.cv_drink.notify_all(); //let all waiting guests know that coffee has been refilled
         }
     }
 

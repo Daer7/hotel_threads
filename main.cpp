@@ -17,7 +17,7 @@
 #define ELEVATOR_C 4
 #define WAITER_C 5
 #define COFFEE_C 6
-#define POOL_C 7
+#define JACUZZI_C 7
 
 std::mutex mx_writing;
 std::atomic<bool> cancellation_token(false);
@@ -154,11 +154,11 @@ struct Coffee_machine
 struct Jacuzzi
 {
     Jacuzzi() {}
-    int capacity = 3;
+    int capacity = 2;
     int floor = 0;
     int guests_inside = 0;
 
-    std::mutex place_mxs[3];
+    std::mutex place_mxs[2];
 
     WINDOW *jacuzzi_window;
 
@@ -167,10 +167,10 @@ struct Jacuzzi
         jacuzzi_window = newwin(24, 40, 0, 160);
 
         std::lock_guard<std::mutex> writing_lock(mx_writing);
-        wattron(this->jacuzzi_window, COLOR_PAIR(POOL_C));
+        wattron(this->jacuzzi_window, COLOR_PAIR(JACUZZI_C));
         box(this->jacuzzi_window, 0, 0);
-        wattroff(this->jacuzzi_window, COLOR_PAIR(POOL_C));
-        mvwprintw(this->jacuzzi_window, 5, 14, "SWIMMING POOL");
+        wattroff(this->jacuzzi_window, COLOR_PAIR(JACUZZI_C));
+        mvwprintw(this->jacuzzi_window, 5, 17, "JACUZZI");
         mvwprintw(this->jacuzzi_window, 6, 17, "FLOOR %d", this->floor);
         mvwprintw(this->jacuzzi_window, 9, 13, "AVAILABLE PLACES");
         mvwprintw(this->jacuzzi_window, 10, 20, "%d", this->capacity - this->guests_inside);
@@ -427,9 +427,13 @@ struct Guest
     void relax_in_jacuzzi()
     {
         std::atomic<bool> had_bath{false};
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 2; i++)
         {
-            if (!this->jacuzzi.place_mxs[i].try_lock() || had_bath) //if lock of jacuzzi i-th place mutex failed or guest has already had bath in for loop
+            if (had_bath) //if guest has already had a bath in for loop
+            {
+                continue;
+            }
+            else if (!this->jacuzzi.place_mxs[i].try_lock()) //if place mutex owned by another thread
             {
                 continue;
             }
@@ -449,6 +453,7 @@ struct Guest
 
                     this->jacuzzi.guests_inside--;
                     this->jacuzzi.update_guests_inside(this->id, 'O');
+
                     had_bath = true;
                 }
 
@@ -461,11 +466,12 @@ struct Guest
                 fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
             }
         }
+
         if (!had_bath)
         {
             {
                 std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "NO RELAX, JACUZZI WAS FULL      ");
+                mvwprintw(this->guest_window, 1, 29, "NO RELAX, JACUZZI WAS FULL    ");
                 wrefresh(this->guest_window);
             }
             fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
@@ -667,7 +673,7 @@ int main()
     init_pair(ELEVATOR_C, COLOR_MAGENTA, COLOR_BLACK);
     init_pair(WAITER_C, COLOR_CYAN, COLOR_BLACK);
     init_pair(COFFEE_C, COLOR_GREEN, COLOR_BLACK);
-    init_pair(POOL_C, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(JACUZZI_C, COLOR_YELLOW, COLOR_BLACK);
 
     std::vector<Room> rooms(9);
     for (int i = 8; i >= 0; i--)

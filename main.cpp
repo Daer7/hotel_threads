@@ -202,7 +202,7 @@ struct Elevator
 {
     int current_floor = 0;
     std::vector<int> guests_inside;
-    std::mutex mx_out, mx_in;
+    std::mutex mx;
     std::condition_variable cv_out, cv_in;
 
     WINDOW *elevator_window;
@@ -222,22 +222,60 @@ struct Elevator
         mvwprintw(this->elevator_window, 2, 16, "ELEVATOR");
         mvwprintw(this->elevator_window, 6, 13, "CURRENT FLOOR");
         mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
-        mvwprintw(this->elevator_window, 11, 13, "GUESTS INSIDE");
+        mvwprintw(this->elevator_window, 9, 13, "GUESTS INSIDE");
+        mvwprintw(this->elevator_window, 12, 17, "STATUS");
         wrefresh(this->elevator_window);
         wrefresh(this->progress_window);
     }
 
     void go_to_floor(int floor)
     {
+        this->current_floor = -1; //floor equal to -1 while elevator is moving
         {
-            std::unique_lock<std::mutex> lock_out(this->mx_out);
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->elevator_window, 7, 20, "M");
+            mvwprintw(this->elevator_window, 13, 5, "    ON ITS WAY TO FLOOR %1d     ", floor);
+            wrefresh(this->elevator_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(ELEVATOR_C), 39, std::experimental::randint(1500, 2500));
+
+        {
+            std::unique_lock<std::mutex> lock_out(this->mx);
             this->current_floor = floor;
             this->cv_out.notify_all();
         }
         {
-            std::unique_lock<std::mutex> lock_in(this->mx_in);
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
+            mvwprintw(this->elevator_window, 13, 5, "GUESTS GETTING OFF ON FLOOR %1d", this->current_floor);
+            wrefresh(this->elevator_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(ELEVATOR_C), 39, std::experimental::randint(500, 1000));
+
+        {
+            std::unique_lock<std::mutex> lock_in(this->mx);
             this->cv_in.notify_all();
         }
+
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->elevator_window, 13, 5, "GUESTS GETTING IN ON FLOOR %1d ", this->current_floor);
+            wrefresh(this->elevator_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(ELEVATOR_C), 39, std::experimental::randint(500, 1000));
+
+        std::unique_lock<std::mutex> writing_lock(mx_writing); //std::defer_lock);
+        //std::unique_lock<std::mutex> guests_lock(this->mx, std::defer_lock);
+        //std::lock(writing_lock, guests_lock);
+        mvwprintw(this->elevator_window, 10, 8, "                        ");
+        wattron(this->elevator_window, COLOR_PAIR(GUEST_C));
+        for (int i = 0; i < this->guests_inside.size(); i++)
+        {
+
+            mvwprintw(this->elevator_window, 10, 8 + 3 * i, "%2d ", this->guests_inside[i]);
+        }
+        wattroff(this->elevator_window, COLOR_PAIR(GUEST_C));
+        wrefresh(this->elevator_window);
     }
 
     void go()
@@ -387,12 +425,14 @@ struct Guest
 
     void drink_coffee()
     {
+        use_elevator(this->coffee_machine.floor);
+
         int amount_to_drink = std::experimental::randint(100, 300);
         {
             std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
             {
                 std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "WAITING TO DRINK COFFEE");
+                mvwprintw(this->guest_window, 1, 29, "WAITING TO DRINK COFFEE      ");
                 wrefresh(this->guest_window);
             }
 
@@ -409,7 +449,7 @@ struct Guest
 
             {
                 std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "POURING %3d ML OF COFFEE", amount_to_drink);
+                mvwprintw(this->guest_window, 1, 29, "POURING %3d ML OF COFFEE     ", amount_to_drink);
                 wrefresh(this->guest_window);
             }
             fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
@@ -417,7 +457,7 @@ struct Guest
         }
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
-            mvwprintw(this->guest_window, 1, 29, "DRINKING %3d ML OF COFFEE ", amount_to_drink);
+            mvwprintw(this->guest_window, 1, 29, "DRINKING %3d ML OF COFFEE     ", amount_to_drink);
             wrefresh(this->guest_window);
         }
         //sleep while drinking coffee
@@ -426,6 +466,8 @@ struct Guest
 
     void relax_in_jacuzzi()
     {
+        use_elevator(this->jacuzzi.floor);
+
         std::atomic<bool> had_bath{false};
         for (int i = 0; i < 2; i++)
         {
@@ -481,7 +523,12 @@ struct Guest
     void use_elevator(int destination_floor)
     {
         {
-            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx_in);
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 29, "WAITING TO GET TO FLOOR %d", destination_floor);
+            wrefresh(this->guest_window);
+        }
+        {
+            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx);
             while (this->current_floor != elevator.current_floor)
             {
                 this->elevator.cv_in.wait(lock_elevator);
@@ -489,7 +536,12 @@ struct Guest
             elevator.guests_inside.push_back(this->id);
         }
         {
-            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx_out);
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 29, "IN THE ELEVATOR ---> FLOOR %d", destination_floor);
+            wrefresh(this->guest_window);
+        }
+        {
+            std::unique_lock<std::mutex> lock_elevator(this->elevator.mx);
             while (destination_floor != elevator.current_floor)
             {
                 this->elevator.cv_out.wait(lock_elevator);
@@ -498,6 +550,14 @@ struct Guest
             elevator.guests_inside.erase(std::remove(elevator.guests_inside.begin(), elevator.guests_inside.end(), this->id), elevator.guests_inside.end());
             this->current_floor = destination_floor;
         }
+
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 27, "%d", destination_floor);
+            mvwprintw(this->guest_window, 1, 29, "GOT OFF THE ELEVATOR, FLOOR %d", destination_floor);
+            wrefresh(this->guest_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1000, 1500));
     }
 
     void leave_hotel()
@@ -732,6 +792,7 @@ int main()
         threadList.emplace_back(&Cleaner::clean_rooms, std::ref(cleaner));
     }
     threadList.emplace_back(&Waiter::serve_guests, std::ref(waiter));
+    threadList.emplace_back(&Elevator::go, std::ref(elevator));
 
     for (std::thread &t : threadList)
     {

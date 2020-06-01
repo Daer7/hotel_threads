@@ -59,14 +59,16 @@ struct Guest
 
         {
             std::unique_lock<std::mutex> lock_receptionist(receptionist.mx);
-            while (!receptionist.is_a_room_ready)
+            while (!receptionist.found_a_ready_room)
             {
-                receptionist.cv.wait(lock_receptionist);
+                receptionist.cv_assign_room.wait(lock_receptionist);
             }
-            receptionist.is_a_room_ready = false;
+
+            receptionist.found_a_ready_room = false;
             this->room_id = receptionist.number_to_check_in; //assign room to guest
-            //this->current_floor = receptionist.rooms[this->room_id].floor; //assign floor where guest currently is
-            receptionist.rooms[this->room_id].guest_arrives(this->id); //assign guest to room && room becomes occupied
+
+            std::unique_lock<std::mutex> lock_room(receptionist.rooms[this->room_id].mx); //owns room mutex
+            receptionist.rooms[this->room_id].guest_arrives(this->id);                    //assign guest to room && room becomes occupied
         }
 
         use_elevator(receptionist.rooms[this->room_id].floor); //go to your room by elevator

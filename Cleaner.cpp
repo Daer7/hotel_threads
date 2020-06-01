@@ -13,8 +13,10 @@
 
 struct Cleaner
 {
-    Cleaner(int id, std::vector<Room> &rooms) : id(id), rooms(rooms) {}
+    Cleaner(int id, Receptionist &receptionist, std::vector<Room> &rooms) : id(id), receptionist(receptionist), rooms(rooms) {}
     int id;
+
+    Receptionist &receptionist;
     std::vector<Room> &rooms;
 
     WINDOW *cleaner_window;
@@ -51,20 +53,21 @@ struct Cleaner
                 std::unique_lock<std::mutex> lock_room(room.mx, std::adopt_lock);
                 if (room.guest_id == -1 && !room.is_ready_for_guest)
                 {
+                    room.room_being_cleaned(this->id);
                     {
                         std::lock_guard<std::mutex> writing_lock(mx_writing);
                         mvwprintw(this->cleaner_window, 1, 11, "CLEANING ROOM %2d  ", room.id);
                         wrefresh(this->cleaner_window);
                     }
-                    room.room_being_cleaned(this->id);
                     fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
+
                     room.is_ready_for_guest = true;
+                    room.room_clean();
                     {
                         std::lock_guard<std::mutex> writing_lock(mx_writing);
                         mvwprintw(this->cleaner_window, 1, 11, "WAITING FOR A ROOM");
                         wrefresh(this->cleaner_window);
                     }
-                    room.room_clean();
                     fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(1500, 2500));
                 }
             }

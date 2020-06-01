@@ -13,7 +13,7 @@
 
 struct Elevator
 {
-    int current_floor = 0;
+    int current_floor = -1;
     std::vector<int> guests_inside;
     std::mutex mx;
     std::condition_variable cv_out, cv_in;
@@ -43,7 +43,6 @@ struct Elevator
 
     void go_to_floor(int floor)
     {
-        this->current_floor = -1; //floor equal to -1 while elevator is moving
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
             mvwprintw(this->elevator_window, 7, 20, "M");
@@ -77,9 +76,9 @@ struct Elevator
         }
         fill_progress_bar(this->progress_window, COLOR_PAIR(ELEVATOR_C), 39, std::experimental::randint(500, 1000));
 
-        std::unique_lock<std::mutex> writing_lock(mx_writing); //std::defer_lock);
-        //std::unique_lock<std::mutex> guests_lock(this->mx, std::defer_lock);
-        //std::lock(writing_lock, guests_lock);
+        std::unique_lock<std::mutex> writing_lock(mx_writing, std::defer_lock);
+        std::unique_lock<std::mutex> guests_lock(this->mx, std::defer_lock);
+        std::lock(writing_lock, guests_lock);
         mvwprintw(this->elevator_window, 10, 8, "                              ");
         wattron(this->elevator_window, COLOR_PAIR(GUEST_C));
         for (int i = 0; i < this->guests_inside.size(); i++)
@@ -89,6 +88,8 @@ struct Elevator
         }
         wattroff(this->elevator_window, COLOR_PAIR(GUEST_C));
         wrefresh(this->elevator_window);
+
+        this->current_floor = -1; //floor equal to -1 while elevator is moving (changed when mutex is owned)
     }
 
     void go()

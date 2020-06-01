@@ -17,8 +17,9 @@ struct Receptionist
     std::vector<Room> &rooms;
 
     std::mutex mx;
-    std::condition_variable cv;
-    std::atomic<bool> is_a_room_ready{false};
+    std::condition_variable cv_look_for_a_room, cv_assign_room;
+    std::atomic<bool> found_a_ready_room{false};
+
     int number_to_check_in = 0;
 
     int y_size = 5, x_size = 40, y_corner, x_corner;
@@ -46,12 +47,14 @@ struct Receptionist
         fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(500, 1000));
         {
             std::unique_lock<std::mutex> lock_receptionist(mx);
+
             do
             {
                 this->number_to_check_in = std::experimental::randint(0, (int)rooms.size() - 1); //try to find an empty room
             } while (!rooms[this->number_to_check_in].is_ready_for_guest);
-            is_a_room_ready = true;
-            cv.notify_one(); //notify a guest that an empty room has been found
+
+            found_a_ready_room = true;
+            cv_assign_room.notify_one(); //notify a guest that an empty room has been found
         }
 
         {

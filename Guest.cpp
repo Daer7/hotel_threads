@@ -55,7 +55,6 @@ struct Guest
             mvwprintw(this->guest_window, 1, 27, "0 WAITING FOR CHECK-IN          ");
             wrefresh(this->guest_window);
         }
-        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
 
         {
             std::unique_lock<std::mutex> lock_receptionist(receptionist.mx);
@@ -67,8 +66,7 @@ struct Guest
             receptionist.found_a_ready_room = false;
             this->room_id = receptionist.number_to_check_in; //assign room to guest
 
-            std::unique_lock<std::mutex> lock_room(receptionist.rooms[this->room_id].mx); //owns room mutex
-            receptionist.rooms[this->room_id].guest_arrives(this->id);                    //assign guest to room && room becomes occupied
+            receptionist.rooms[this->room_id].guest_arrives(this->id); //assign guest to room && room becomes occupied
         }
 
         use_elevator(receptionist.rooms[this->room_id].floor); //go to your room by elevator
@@ -88,14 +86,15 @@ struct Guest
     {
         use_elevator(this->coffee_machine.floor);
 
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->guest_window, 1, 29, "WAITING TO DRINK COFFEE       ");
+            wrefresh(this->guest_window);
+        }
+
         int amount_to_drink = std::experimental::randint(100, 300);
         {
             std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-            {
-                std::lock_guard<std::mutex> writing_lock(mx_writing);
-                mvwprintw(this->guest_window, 1, 29, "WAITING TO DRINK COFFEE       ");
-                wrefresh(this->guest_window);
-            }
 
             coffee_machine.guests_amounts_list.emplace_back(this->id, amount_to_drink); //queue up for coffee
 
@@ -116,6 +115,7 @@ struct Guest
             fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
             coffee_machine.guest_drinks(this->id, amount_to_drink);
         }
+
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
             mvwprintw(this->guest_window, 1, 29, "DRINKING %3d ML OF COFFEE    ", amount_to_drink);
@@ -237,9 +237,13 @@ struct Guest
         fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
 
         {
-            std::unique_lock<std::mutex> lock_room(receptionist.rooms[this->room_id].mx); //acquire mutex before guest_id is changed
+            std::unique_lock<std::mutex> lock(receptionist.mx);
+            receptionist.rooms_to_be_cleaned.push_back(this->room_id);
             receptionist.rooms[this->room_id].guest_leaves(this->id);
+            this->room_id = -1;
+            receptionist.cv_clean_room.notify_one(); // let cleaners know
         }
+
         use_elevator(0); //go to floor 0 before leaving
 
         {

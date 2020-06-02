@@ -51,7 +51,7 @@ int main()
     std::vector<Cleaner> cleaners;
     for (int i = 0; i < 3; i++)
     {
-        cleaners.emplace_back(i, receptionist, rooms);
+        cleaners.emplace_back(i, receptionist);
         cleaners[i].yc_corner = 15 + i * 3;
         cleaners[i].yp_corner = 15 + i * 3;
         cleaners[i].draw_cleaner();

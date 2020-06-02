@@ -13,11 +13,10 @@
 
 struct Cleaner
 {
-    Cleaner(int id, Receptionist &receptionist, std::vector<Room> &rooms) : id(id), receptionist(receptionist), rooms(rooms) {}
+    Cleaner(int id, Receptionist &receptionist) : id(id), receptionist(receptionist) {}
     int id;
 
     Receptionist &receptionist;
-    std::vector<Room> &rooms;
 
     WINDOW *cleaner_window;
     WINDOW *progress_window;
@@ -42,36 +41,40 @@ struct Cleaner
 
     void find_room_to_clean()
     {
-        for (Room &room : rooms)
+        int room_to_clean_id;
         {
-            if (!room.mx.try_lock()) //try to lock, in case of failure, continue loop
+            std::unique_lock<std::mutex> lock(receptionist.mx);
+            while (receptionist.rooms_to_be_cleaned.size() == 0)
             {
-                continue;
+                receptionist.cv_clean_room.wait(lock); //wait for notification from a guest
             }
-            else //see if room needs to be cleaned
-            {
-                std::unique_lock<std::mutex> lock_room(room.mx, std::adopt_lock);
-                if (room.guest_id == -1 && !room.is_ready_for_guest)
-                {
-                    room.room_being_cleaned(this->id);
-                    {
-                        std::lock_guard<std::mutex> writing_lock(mx_writing);
-                        mvwprintw(this->cleaner_window, 1, 11, "CLEANING ROOM %2d  ", room.id);
-                        wrefresh(this->cleaner_window);
-                    }
-                    fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
-
-                    room.is_ready_for_guest = true;
-                    room.room_clean();
-                    {
-                        std::lock_guard<std::mutex> writing_lock(mx_writing);
-                        mvwprintw(this->cleaner_window, 1, 11, "WAITING FOR A ROOM");
-                        wrefresh(this->cleaner_window);
-                    }
-                    fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(1500, 2500));
-                }
-            }
+            // draw a room to clean, remember it and erase from rooms_to_be_cleaned
+            int idx = std::experimental::randint(0, (int)receptionist.rooms_to_be_cleaned.size() - 1);
+            room_to_clean_id = receptionist.rooms_to_be_cleaned[idx];
+            receptionist.rooms_to_be_cleaned.erase(receptionist.rooms_to_be_cleaned.begin() + idx);
         }
+
+        receptionist.rooms[room_to_clean_id].room_being_cleaned(this->id);
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->cleaner_window, 1, 11, "CLEANING ROOM %2d  ", room_to_clean_id);
+            wrefresh(this->cleaner_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(2500, 3500));
+        receptionist.rooms[room_to_clean_id].room_clean();
+
+        {
+            std::unique_lock<std::mutex> lock(receptionist.mx);
+            receptionist.ready_rooms.push_back(room_to_clean_id);
+            receptionist.cv_pick_a_room.notify_one(); //let receptionist know
+        }
+
+        {
+            std::lock_guard<std::mutex> writing_lock(mx_writing);
+            mvwprintw(this->cleaner_window, 1, 11, "WAITING FOR A ROOM");
+            wrefresh(this->cleaner_window);
+        }
+        fill_progress_bar(this->progress_window, COLOR_PAIR(CLEANER_C), 40, std::experimental::randint(1000, 1500));
     }
 
     void clean_rooms()

@@ -19,8 +19,6 @@ struct Room
     int id;
     int guest_id = -1;
     int floor;
-    std::atomic<bool> is_ready_for_guest{true};
-    std::mutex mx;
 
     int y_size = 7, x_size = 7, y_corner, x_corner;
     WINDOW *room_window;
@@ -36,7 +34,6 @@ struct Room
     void guest_arrives(int guest_id)
     {
         this->guest_id = guest_id;
-        this->is_ready_for_guest = false;
     }
     void display_guest_arrival()
     {

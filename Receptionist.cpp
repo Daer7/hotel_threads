@@ -13,14 +13,25 @@
 
 struct Receptionist
 {
-    Receptionist(std::vector<Room> &rooms) : rooms(rooms) {}
+    Receptionist(std::vector<Room> &rooms) : rooms(rooms)
+    {
+        for (Room &room : rooms)
+        {
+            ready_rooms.push_back(room.id);
+        }
+    }
     std::vector<Room> &rooms;
 
-    std::mutex mx;
-    std::condition_variable cv_look_for_a_room, cv_assign_room;
-    std::atomic<bool> found_a_ready_room{false};
+    std::vector<int> rooms_to_be_cleaned; // guests push back, cleaners remove
+    std::vector<int> ready_rooms;         // cleaners push back, receptioist removes
 
-    int number_to_check_in = 0;
+    std::mutex mx;
+    std::condition_variable cv_pick_a_room; // receptionist waits, cleanes notify
+    std::condition_variable cv_assign_room; // guests wait, receptionist notifies
+    std::condition_variable cv_clean_room;  // guests notify, cleaners wait
+
+    std::atomic<bool> found_a_ready_room{false};
+    int number_to_check_in = 0; // receptionist writes, guests read
 
     int y_size = 5, x_size = 40, y_corner, x_corner;
     WINDOW *receptionist_window;
@@ -47,13 +58,14 @@ struct Receptionist
         fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(500, 1000));
         {
             std::unique_lock<std::mutex> lock_receptionist(mx);
-
-            do
+            while (this->ready_rooms.size() == 0)
             {
-                this->number_to_check_in = std::experimental::randint(0, (int)rooms.size() - 1); //try to find an empty room
-            } while (!rooms[this->number_to_check_in].is_ready_for_guest);
-
+                cv_pick_a_room.wait(lock_receptionist);
+            }
+            int idx = std::experimental::randint(0, (int)ready_rooms.size() - 1);
+            this->number_to_check_in = this->ready_rooms[idx]; //draw a ready room
             found_a_ready_room = true;
+            this->ready_rooms.erase(this->ready_rooms.begin() + idx);
             cv_assign_room.notify_one(); //notify a guest that an empty room has been found
         }
 
@@ -63,7 +75,7 @@ struct Receptionist
             wrefresh(this->receptionist_window);
         }
 
-        fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(1000, 1400));
+        fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(500, 1000));
 
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);

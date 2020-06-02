@@ -39,8 +39,8 @@ struct Receptionist
 
     void draw_receptionist_desk()
     {
-        receptionist_window = newwin(3, 40, 21, 100);
-        progress_window = newwin(3, 20, 21, 140);
+        this->receptionist_window = newwin(3, 40, 21, 100);
+        this->progress_window = newwin(3, 20, 21, 140);
         std::lock_guard<std::mutex> writing_lock(mx_writing);
         wattron(this->receptionist_window, COLOR_PAIR(RECEP_C));
         box(this->receptionist_window, 0, 0);
@@ -57,16 +57,21 @@ struct Receptionist
     {
         fill_progress_bar(this->progress_window, COLOR_PAIR(RECEP_C), 20, std::experimental::randint(500, 1000));
         {
-            std::unique_lock<std::mutex> lock_receptionist(mx);
+            std::unique_lock<std::mutex> lock(this->mx);
             while (this->ready_rooms.size() == 0)
             {
-                cv_pick_a_room.wait(lock_receptionist);
+                this->cv_pick_a_room.wait(lock);
+                if (cancellation_token)
+                {
+                    return;
+                }
             }
+
             int idx = std::experimental::randint(0, (int)ready_rooms.size() - 1);
             this->number_to_check_in = this->ready_rooms[idx]; //draw a ready room
-            found_a_ready_room = true;
+            this->found_a_ready_room = true;
             this->ready_rooms.erase(this->ready_rooms.begin() + idx);
-            cv_assign_room.notify_one(); //notify a guest that an empty room has been found
+            this->cv_assign_room.notify_one(); //notify a guest that an empty room has been found
         }
 
         {
@@ -86,7 +91,7 @@ struct Receptionist
 
     void accommodate_guests()
     {
-        while (true)
+        while (!cancellation_token)
         {
             check_free_rooms();
         }

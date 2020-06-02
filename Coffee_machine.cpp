@@ -13,9 +13,9 @@
 
 struct Coffee_machine
 {
-    Coffee_machine() {}
+    Coffee_machine() : floor(2) {}
+    const int floor;
     int millilitres = 500;
-    int floor = 2;
 
     std::list<std::pair<int, int>> guests_amounts_list;
 

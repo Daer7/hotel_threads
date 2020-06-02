@@ -25,8 +25,8 @@ struct Cleaner
 
     void draw_cleaner()
     {
-        cleaner_window = newwin(yc_size, xc_size, yc_corner, xc_corner);
-        progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
+        this->cleaner_window = newwin(yc_size, xc_size, yc_corner, xc_corner);
+        this->progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
         std::lock_guard<std::mutex> writing_lock(mx_writing);
         wattron(this->cleaner_window, COLOR_PAIR(CLEANER_C));
         box(this->cleaner_window, 0, 0);
@@ -47,7 +47,12 @@ struct Cleaner
             while (receptionist.rooms_to_be_cleaned.size() == 0)
             {
                 receptionist.cv_clean_room.wait(lock); //wait for notification from a guest
+                if (cancellation_token)
+                {
+                    return;
+                }
             }
+
             // draw a room to clean, remember it and erase from rooms_to_be_cleaned
             int idx = std::experimental::randint(0, (int)receptionist.rooms_to_be_cleaned.size() - 1);
             room_to_clean_id = receptionist.rooms_to_be_cleaned[idx];
@@ -79,7 +84,7 @@ struct Cleaner
 
     void clean_rooms()
     {
-        while (true)
+        while (!cancellation_token)
         {
             find_room_to_clean();
         }

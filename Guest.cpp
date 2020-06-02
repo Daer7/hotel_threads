@@ -33,8 +33,8 @@ struct Guest
 
     void draw_guest()
     {
-        guest_window = newwin(yg_size, xg_size, yg_corner, xg_corner);
-        progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
+        this->guest_window = newwin(yg_size, xg_size, yg_corner, xg_corner);
+        this->progress_window = newwin(yp_size, xp_size, yp_corner, xp_corner);
 
         std::lock_guard<std::mutex> writing_lock(mx_writing);
         wattron(this->guest_window, COLOR_PAIR(GUEST_C));
@@ -57,15 +57,14 @@ struct Guest
         }
 
         {
-            std::unique_lock<std::mutex> lock_receptionist(receptionist.mx);
+            std::unique_lock<std::mutex> lock(receptionist.mx);
             while (!receptionist.found_a_ready_room)
             {
-                receptionist.cv_assign_room.wait(lock_receptionist);
+                receptionist.cv_assign_room.wait(lock);
             }
 
             receptionist.found_a_ready_room = false;
-            this->room_id = receptionist.number_to_check_in; //assign room to guest
-
+            this->room_id = receptionist.number_to_check_in;           //assign room to guest
             receptionist.rooms[this->room_id].guest_arrives(this->id); //assign guest to room && room becomes occupied
         }
 
@@ -95,7 +94,6 @@ struct Guest
         int amount_to_drink = std::experimental::randint(100, 300);
         {
             std::unique_lock<std::mutex> lock_coffee(coffee_machine.mx);
-
             coffee_machine.guests_amounts_list.emplace_back(this->id, amount_to_drink); //queue up for coffee
 
             while (coffee_machine.millilitres - amount_to_drink < 0)
@@ -177,7 +175,7 @@ struct Guest
                 mvwprintw(this->guest_window, 1, 29, "NO RELAX, JACUZZI WAS FULL    ");
                 wrefresh(this->guest_window);
             }
-            fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
+            fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
         }
     }
 
@@ -257,12 +255,15 @@ struct Guest
 
     void have_holiday()
     {
-        while (true)
+        while (!cancellation_token_guests)
         {
             check_in();
             drink_coffee();
             relax_in_jacuzzi();
             leave_hotel();
         }
+        std::lock_guard<std::mutex> lock(mx_guests_exit);
+        num_of_finished_guest_threads++;
+        cv_guests_exit.notify_one();
     }
 };

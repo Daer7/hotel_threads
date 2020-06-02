@@ -16,7 +16,8 @@ struct Elevator
     int current_floor = -1;
     std::vector<int> guests_inside;
     std::mutex mx;
-    std::condition_variable cv_out, cv_in;
+    std::condition_variable cv_out;
+    std::condition_variable cv_in;
 
     WINDOW *elevator_window;
     WINDOW *progress_window;
@@ -34,7 +35,7 @@ struct Elevator
         wattroff(this->progress_window, COLOR_PAIR(ELEVATOR_C));
         mvwprintw(this->elevator_window, 2, 16, "ELEVATOR");
         mvwprintw(this->elevator_window, 6, 13, "CURRENT FLOOR");
-        mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
+        //mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
         mvwprintw(this->elevator_window, 9, 13, "GUESTS INSIDE");
         mvwprintw(this->elevator_window, 12, 17, "STATUS");
         wrefresh(this->elevator_window);
@@ -94,7 +95,7 @@ struct Elevator
 
     void go()
     {
-        while (true)
+        while (!cancellation_token)
         {
             go_to_floor(0);
             go_to_floor(1);

@@ -71,7 +71,7 @@ struct Waiter
 
     void serve_guests()
     {
-        while (true)
+        while (!cancellation_token)
         {
             refill_coffee();
         }

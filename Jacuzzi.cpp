@@ -13,9 +13,9 @@
 
 struct Jacuzzi
 {
-    Jacuzzi() {}
-    int capacity = 2;
-    int floor = 0;
+    Jacuzzi() : capacity(2), floor(0) {}
+    const int capacity;
+    const int floor;
     int guests_inside = 0;
 
     std::mutex place_mxs[2];

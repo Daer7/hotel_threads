@@ -10,9 +10,15 @@ const int ELEVATOR_C = 4;
 const int WAITER_C = 5;
 const int COFFEE_C = 6;
 const int JACUZZI_C = 7;
+const int EXIT_C = 8;
+const int EXIT_C2 = 9;
 
 std::mutex mx_writing;
+std::mutex mx_guests_exit;
+std::condition_variable cv_guests_exit;
+std::atomic<bool> cancellation_token_guests(false);
 std::atomic<bool> cancellation_token(false);
+int num_of_finished_guest_threads = 0;
 
 void fill_progress_bar(WINDOW *progress_window, int COL, int width, int sleep_time)
 {

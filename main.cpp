@@ -34,6 +34,14 @@ int main()
     init_pair(WAITER_C, COLOR_CYAN, COLOR_BLACK);
     init_pair(COFFEE_C, COLOR_GREEN, COLOR_BLACK);
     init_pair(JACUZZI_C, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(EXIT_C, COLOR_BLACK, COLOR_BLUE);
+    init_pair(EXIT_C2, COLOR_YELLOW, COLOR_BLACK);
+
+    WINDOW *exitwin = newwin(4, 54, 4, 6);
+    wbkgd(exitwin, COLOR_PAIR(EXIT_C));
+    wattron(exitwin, COLOR_PAIR(EXIT_C2));
+    mvwprintw(exitwin, 1, 1, "PRESS Q TO EXIT (IT TAKES A REALLY LONG TIME):  ");
+    wrefresh(exitwin);
 
     std::vector<Room> rooms(9);
     for (int i = 8; i >= 0; i--)
@@ -94,10 +102,30 @@ int main()
     threadList.emplace_back(&Waiter::serve_guests, std::ref(waiter));
     threadList.emplace_back(&Elevator::go, std::ref(elevator));
 
+    while (true)
+    {
+        char c = wgetch(exitwin);
+        if (c == 'q')
+        {
+            cancellation_token_guests = true;
+            std::unique_lock<std::mutex> lock(mx_guests_exit);
+            while (num_of_finished_guest_threads < 15)
+            {
+                cv_guests_exit.wait(lock);
+            }
+            cancellation_token = true;
+            //notify other threads if waiting in vain
+            receptionist.cv_pick_a_room.notify_all();
+            receptionist.cv_clean_room.notify_all();
+            break;
+        }
+    }
+
     for (std::thread &t : threadList)
     {
         t.join();
     }
 
+    endwin();
     return 0;
 }

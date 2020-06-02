@@ -236,8 +236,10 @@ struct Guest
         }
         fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
 
-        receptionist.rooms[this->room_id].guest_leaves(this->id);
-
+        {
+            std::unique_lock<std::mutex> lock_room(receptionist.rooms[this->room_id].mx); //acquire mutex before guest_id is changed
+            receptionist.rooms[this->room_id].guest_leaves(this->id);
+        }
         use_elevator(0); //go to floor 0 before leaving
 
         {

@@ -78,7 +78,7 @@ struct Guest
             mvwprintw(this->guest_window, 1, 27, "%1d CHECKED IN TO ROOM %1d          ", this->current_floor, this->room_id);
             wrefresh(this->guest_window);
         }
-        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
     }
 
     void drink_coffee()
@@ -150,7 +150,7 @@ struct Guest
                         wrefresh(this->guest_window);
                     }
 
-                    fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(3500, 4500));
+                    fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
 
                     this->jacuzzi.guests_inside--;
                     this->jacuzzi.update_guests_inside(this->id, 'O');
@@ -250,7 +250,7 @@ struct Guest
             mvwprintw(this->guest_window, 1, 27, "X LEFT THE HOTEL                ");
             wrefresh(this->guest_window);
         }
-        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(2500, 3500));
+        fill_progress_bar(this->progress_window, COLOR_PAIR(GUEST_C), 40, std::experimental::randint(1500, 2500));
     }
 
     void have_holiday()

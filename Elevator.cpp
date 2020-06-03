@@ -57,6 +57,7 @@ struct Elevator
             this->current_floor = floor;
             this->cv_out.notify_all();
         }
+
         {
             std::lock_guard<std::mutex> writing_lock(mx_writing);
             mvwprintw(this->elevator_window, 7, 20, "%1d", this->current_floor);
